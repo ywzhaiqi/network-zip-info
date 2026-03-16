@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Zip Info - 浏览器测试</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 20px;
+    }
+    .input-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: bold;
+      color: #555;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-top: 10px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .output {
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+      max-height: 500px;
+      overflow-y: auto;
+    }
+    .output h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    .log {
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .error {
+      color: #dc3545;
+      background: #f8d7da;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      border: 1px solid #f5c6cb;
+    }
+    .success {
+      color: #28a745;
+      background: #d4edda;
+      padding: 10px;
+      border-radius: 4px;
+      margin-top: 10px;
+      border: 1px solid #c3e6cb;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      text-align: left;
+      font-size: 13px;
+    }
+    th {
+      background: #f2f2f2;
+      font-weight: bold;
+    }
+    tr:nth-child(even) {
+      background: #f9f9f9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Network Zip Info - 浏览器测试</h1>
+    
+    <div class="input-group">
+      <label for="zipUrl">ZIP 文件 URL:</label>
+      <input 
+        type="text" 
+        id="zipUrl" 
+        placeholder="输入 ZIP 文件的 URL，例如：https://example.com/file.zip"
+        value=""
+      />
+      <label style="margin-top: 10px;">
+        <input type="checkbox" id="debugCheckbox" checked /> 启用调试日志
+      </label>
+      <button id="testBtn" onclick="testZip()">开始测试</button>
+    </div>
+
+    <script>
+      // 页面加载时恢复上次使用的 URL
+      window.addEventListener('DOMContentLoaded', () => {
+        const savedUrl = localStorage.getItem('lastTestZipUrl');
+        if (savedUrl) {
+          document.getElementById('zipUrl').value = savedUrl;
+        }
+      });
+    </script>
+
+    <div id="output"></div>
+    
+    <div>
+      <h3>📋 调试日志</h3>
+      <div class="log" id="consoleLog"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // 劫持 console.log 显示在页面上
+    const originalLog = console.log;
+    const logDiv = document.getElementById('consoleLog');
+    
+    console.log = function(...args) {
+      originalLog.apply(console, args);
+      const message = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+      logDiv.textContent += message + '\n';
+      logDiv.scrollTop = logDiv.scrollHeight;
+    };
+
+    // 暴露测试函数到全局作用域
+    window.testZip = async function() {
+      const url = document.getElementById('zipUrl').value.trim();
+      const outputDiv = document.getElementById('output');
+      
+      if (!url) {
+        outputDiv.innerHTML = '<div class="error">请输入 ZIP 文件的 URL</div>';
+        return;
+      }
+
+      // 保存 URL 到 localStorage
+      localStorage.setItem('lastTestZipUrl', url);
+
+      const btn = document.getElementById('testBtn');
+      btn.disabled = true;
+      btn.textContent = '测试中...';
+      logDiv.textContent = '';
+      outputDiv.innerHTML = '';
+
+      try {
+        // 动态导入构建后的模块
+        const { NetworkZipReader, formatSize } = await import('./dist/index.mjs');
+        
+        const debug = document.getElementById('debugCheckbox').checked;
+        console.log('开始测试:', url, '调试模式:', debug);
+        console.log('创建 NetworkZipReader 实例...');
+        
+        const reader = new NetworkZipReader(url, 30, undefined, debug);
+        console.log('初始化...');
+        
+        await reader.initialize();
+        console.log('初始化成功！');
+        
+        console.log('获取摘要信息...');
+        const summary = await reader.getSummary();
+        
+        console.log('获取文件列表...');
+        const files = await reader.getFileList();
+        
+        // 显示结果
+        let html = '<div class="success">✅ 测试成功！</div>';
+        
+        html += '<h3>📊 ZIP 文件摘要</h3>';
+        html += '<table>';
+        html += `<tr><th>属性</th><th>值</th></tr>`;
+        html += `<tr><td>文件数量</td><td>${summary.files}</td></tr>`;
+        html += `<tr><td>目录数量</td><td>${summary.directories}</td></tr>`;
+        html += `<tr><td>原始大小</td><td>${formatSize(summary.totalSize)}</td></tr>`;
+        html += `<tr><td>压缩大小</td><td>${formatSize(summary.compressedSize)}</td></tr>`;
+        html += `<tr><td>压缩率</td><td>${summary.compressionRatio.toFixed(1)}%</td></tr>`;
+        html += `<tr><td>ZIP 文件大小</td><td>${formatSize(summary.zipFileSize)}</td></tr>`;
+        html += '</table>';
+        
+        html += '<h3>📁 文件列表 (前 20 个)</h3>';
+        if (files.length > 0) {
+          html += '<table>';
+          html += '<tr><th>类型</th><th>文件名</th><th>大小</th><th>修改时间</th></tr>';
+          
+          files.slice(0, 20).forEach(file => {
+            const type = file.isDirectory ? '📁 目录' : '📄 文件';
+            const size = file.isDirectory ? '-' : formatSize(file.fileSize);
+            const time = file.lastModified.toLocaleString('zh-CN');
+            
+            html += `<tr>
+              <td>${type}</td>
+              <td>${file.filename}</td>
+              <td>${size}</td>
+              <td>${time}</td>
+            </tr>`;
+          });
+          
+          if (files.length > 20) {
+            html += `<tr><td colspan="4">... 还有 ${files.length - 20} 个文件未显示</td></tr>`;
+          }
+          
+          html += '</table>';
+        } else {
+          html += '<p>没有找到文件</p>';
+        }
+        
+        outputDiv.innerHTML = html;
+        
+      } catch (error) {
+        console.error('测试失败:', error);
+        outputDiv.innerHTML = `
+          <div class="error">
+            ❌ 测试失败<br>
+            <strong>错误信息:</strong> ${error.message}
+          </div>
+        `;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始测试';
+      }
+    };
+  </script>
+</body>
+</html>

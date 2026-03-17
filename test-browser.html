@@ -18,6 +18,74 @@
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
+    .main-content {
+      display: flex;
+      gap: 20px;
+    }
+    .file-list-panel,
+    .file-detail-panel {
+      flex: 1;
+      min-width: 0;
+      background: #f8f9fa;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    .file-detail-panel {
+      display: none;
+    }
+    .file-detail-panel.active {
+      display: block;
+    }
+    .file-list-panel .output,
+    .file-detail-panel #fileDetail {
+      margin-top: 0;
+    }
+    .read-btn {
+      background: #28a745;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+      margin-left: 5px;
+    }
+    .read-btn:hover {
+      background: #218838;
+    }
+    .read-btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .read-btn.loading {
+      background: #ffc107;
+      cursor: wait;
+    }
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-top: 15px;
+    }
+    .pagination button {
+      padding: 6px 12px;
+      margin: 0;
+    }
+    .pagination button:disabled {
+      background: #e9ecef;
+      color: #6c757d;
+      cursor: not-allowed;
+    }
+    .pagination .page-info {
+      padding: 6px 12px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      font-size: 14px;
+    }
     h1 {
       color: #333;
       margin-bottom: 20px;
@@ -117,11 +185,23 @@
       background: #f9f9f9;
     }
   </style>
+
+  <!-- 使用 import map 映射模块 -->
+  <script type="importmap">
+  {
+    "imports": {
+      "net-zip-info": "./dist/index.mjs",
+      "fflate": "https://cdn.jsdelivr.net/npm/fflate@0.8.2/esm/browser.js"
+    }
+  }
+  </script>
 </head>
 <body>
   <div class="container">
+    <!-- 页面标题 -->
     <h1>🔍 Network Zip Info - 浏览器测试</h1>
     
+    <!-- 输入控制区 -->
     <div class="input-group">
       <label for="zipUrl">ZIP 文件 URL:</label>
       <input 
@@ -130,25 +210,30 @@
         placeholder="输入 ZIP 文件的 URL，例如：https://example.com/file.zip"
         value=""
       />
-      <label style="margin-top: 10px;">
-        <input type="checkbox" id="debugCheckbox" checked /> 启用调试日志
-      </label>
-      <button id="testBtn" onclick="testZip()">开始测试</button>
+      <div style="display: flex; align-items: center; gap: 15px; margin-top: 10px;">
+        <label style="margin: 0; display: flex; align-items: center; cursor: pointer;">
+          <input type="checkbox" id="debugCheckbox" checked style="margin-right: 5px;" /> 
+          启用调试日志
+        </label>
+        <button id="testBtn" onclick="testZip()">开始测试</button>
+      </div>
     </div>
 
-    <script>
-      // 页面加载时恢复上次使用的 URL
-      window.addEventListener('DOMContentLoaded', () => {
-        const savedUrl = localStorage.getItem('lastTestZipUrl');
-        if (savedUrl) {
-          document.getElementById('zipUrl').value = savedUrl;
-        }
-      });
-    </script>
-
-    <div id="output"></div>
+    <!-- 主要内容区：文件列表和详情 -->
+    <div class="main-content">
+      <!-- 左侧：文件列表面板 -->
+      <div class="file-list-panel" id="fileListPanel">
+        <div id="output"></div>
+      </div>
+      
+      <!-- 右侧：文件详情面板 -->
+      <div class="file-detail-panel" id="fileDetailPanel">
+        <div id="fileDetail"></div>
+      </div>
+    </div>
     
-    <div>
+    <!-- 底部：调试日志区 -->
+    <div style="margin-top: 20px;">
       <h3>📋 调试日志</h3>
       <div class="log" id="consoleLog"></div>
     </div>
@@ -166,6 +251,95 @@
       ).join(' ');
       logDiv.textContent += message + '\n';
       logDiv.scrollTop = logDiv.scrollHeight;
+    };
+
+    // 全局变量存储 reader 实例
+    window.currentReader = null;
+    
+    // 提供 fflate 给模块使用
+    window.fflate = window.fflate || {};
+
+    // 渲染文件表格
+    function renderFileTable(files, page, pageSize, formatSizeFn) {
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize;
+      const pageFiles = files.slice(start, end);
+      
+      let html = '<table>';
+      html += '<tr><th>类型</th><th>文件名</th><th>大小</th><th>修改时间</th><th>操作</th></tr>';
+      
+      pageFiles.forEach(file => {
+        const type = file.isDirectory ? '📁 目录' : '📄 文件';
+        const size = file.isDirectory ? '-' : formatSizeFn(file.fileSize);
+        const time = file.lastModified.toLocaleString('zh-CN');
+        const actionBtn = file.isDirectory 
+          ? '<span style="color: #999;">-</span>'
+          : `<button class="read-btn" onclick="readFileFromList('${file.filename.replace(/'/g, "\\'")}', this)">📖 读取</button>`;
+        
+        html += `<tr>
+          <td>${type}</td>
+          <td>${file.filename}</td>
+          <td>${size}</td>
+          <td>${time}</td>
+          <td>${actionBtn}</td>
+        </tr>`;
+      });
+      
+      html += '</table>';
+      return html;
+    }
+
+    // 渲染分页控件
+    function renderPagination(total, page, pageSize) {
+      const totalPages = Math.ceil(total / pageSize);
+      
+      if (totalPages <= 1) {
+        return '';
+      }
+      
+      let html = '<div class="pagination">';
+      html += `<button onclick="changePage(1)" ${page === 1 ? 'disabled' : ''}>首页</button>`;
+      html += `<button onclick="changePage(${page - 1})" ${page === 1 ? 'disabled' : ''}>上一页</button>`;
+      html += `<span class="page-info">第 ${page} / ${totalPages} 页（共 ${total} 个文件）</span>`;
+      html += `<button onclick="changePage(${page + 1})" ${page === totalPages ? 'disabled' : ''}>下一页</button>`;
+      html += `<button onclick="changePage(${totalPages})" ${page === totalPages ? 'disabled' : ''}>末页</button>`;
+      html += '</div>';
+      
+      return html;
+    }
+
+    // 切换页码
+    window.changePage = async function(page) {
+      const files = window.allFiles;
+      const pageSize = window.pageSize || 20;
+      const totalPages = Math.ceil(files.length / pageSize);
+      
+      if (page < 1 || page > totalPages) {
+        return;
+      }
+      
+      window.currentPage = page;
+      
+      const { formatSize } = await import('net-zip-info');
+      const outputDiv = document.getElementById('output');
+      let html = '<div class="success">✅ 测试成功！</div>';
+      html += '<h3>📊 ZIP 文件摘要</h3>';
+      html += '<table>';
+      html += `<tr><th>属性</th><th>值</th></tr>`;
+      html += `<tr><td>文件数量</td><td>${files.filter(f => !f.isDirectory).length}</td></tr>`;
+      html += `<tr><td>目录数量</td><td>${files.filter(f => f.isDirectory).length}</td></tr>`;
+      html += '</table>';
+      
+      html += '<h3>📁 文件列表</h3>';
+      html += `<div style="margin-bottom: 10px; color: #666;">共 ${files.length} 个文件</div>`;
+      
+      html += renderFileTable(files, page, pageSize, formatSize);
+      html += renderPagination(files.length, page, pageSize);
+      
+      outputDiv.innerHTML = html;
+      
+      // 滚动到顶部
+      document.getElementById('fileListPanel').scrollTop = 0;
     };
 
     // 暴露测试函数到全局作用域
@@ -189,13 +363,15 @@
 
       try {
         // 动态导入构建后的模块
-        const { NetworkZipReader, formatSize } = await import('./dist/index.mjs');
+        const { NetworkZipReader, formatSize } = await import('net-zip-info');
         
         const debug = document.getElementById('debugCheckbox').checked;
         console.log('开始测试:', url, '调试模式:', debug);
         console.log('创建 NetworkZipReader 实例...');
         
         const reader = new NetworkZipReader(url, 30, undefined, debug);
+        window.currentReader = reader; // 保存全局引用
+        
         console.log('初始化...');
         
         await reader.initialize();
@@ -207,9 +383,13 @@
         console.log('获取文件列表...');
         const files = await reader.getFileList();
         
+        // 保存文件列表到全局变量
+        window.allFiles = files;
+        window.currentPage = 1;
+        window.pageSize = 20;
+        
         // 显示结果
         let html = '<div class="success">✅ 测试成功！</div>';
-        
         html += '<h3>📊 ZIP 文件摘要</h3>';
         html += '<table>';
         html += `<tr><th>属性</th><th>值</th></tr>`;
@@ -221,29 +401,12 @@
         html += `<tr><td>ZIP 文件大小</td><td>${formatSize(summary.zipFileSize)}</td></tr>`;
         html += '</table>';
         
-        html += '<h3>📁 文件列表 (前 20 个)</h3>';
+        html += '<h3>📁 文件列表</h3>';
+        html += `<div style="margin-bottom: 10px; color: #666;">共 ${files.length} 个文件</div>`;
+        
         if (files.length > 0) {
-          html += '<table>';
-          html += '<tr><th>类型</th><th>文件名</th><th>大小</th><th>修改时间</th></tr>';
-          
-          files.slice(0, 20).forEach(file => {
-            const type = file.isDirectory ? '📁 目录' : '📄 文件';
-            const size = file.isDirectory ? '-' : formatSize(file.fileSize);
-            const time = file.lastModified.toLocaleString('zh-CN');
-            
-            html += `<tr>
-              <td>${type}</td>
-              <td>${file.filename}</td>
-              <td>${size}</td>
-              <td>${time}</td>
-            </tr>`;
-          });
-          
-          if (files.length > 20) {
-            html += `<tr><td colspan="4">... 还有 ${files.length - 20} 个文件未显示</td></tr>`;
-          }
-          
-          html += '</table>';
+          html += renderFileTable(files, 1, 20, formatSize);
+          html += renderPagination(files.length, 1, 20);
         } else {
           html += '<p>没有找到文件</p>';
         }
@@ -263,6 +426,178 @@
         btn.textContent = '开始测试';
       }
     };
+
+    // 从文件列表读取文件
+    window.readFileFromList = async function(filename, btnElement) {
+      const reader = window.currentReader;
+      const detailPanel = document.getElementById('fileDetailPanel');
+      const fileDetailDiv = document.getElementById('fileDetail');
+      
+      if (!reader) {
+        fileDetailDiv.innerHTML = '<div class="error">请先加载 ZIP 文件（点击"开始测试"）</div>';
+        detailPanel.classList.add('active');
+        return;
+      }
+      
+      // 设置按钮状态
+      const originalText = btnElement.textContent;
+      btnElement.textContent = '读取中...';
+      btnElement.classList.add('loading');
+      btnElement.disabled = true;
+      
+      try {
+        console.log('读取文件内容:', filename);
+        
+        const { formatSize } = await import('net-zip-info');
+        
+        const result = await reader.getFileContent(filename, {
+          onProgress: (loaded, total) => {
+            const percent = ((loaded / total) * 100).toFixed(1);
+            console.log(`读取进度：${percent}% (${loaded}/${total} 字节)`);
+          }
+        });
+        
+        console.log('读取成功！');
+        displayFileDetail(filename, result, formatSize);
+        detailPanel.classList.add('active');
+        
+      } catch (error) {
+        console.error('读取文件失败:', error);
+        fileDetailDiv.innerHTML = `
+          <div class="error">
+            ❌ 读取文件失败<br>
+            <strong>错误信息:</strong> ${error.message}
+          </div>
+        `;
+        detailPanel.classList.add('active');
+      } finally {
+        btnElement.textContent = originalText;
+        btnElement.classList.remove('loading');
+        btnElement.disabled = false;
+      }
+    };
+
+    // 显示文件详情
+    function displayFileDetail(filename, result, formatSize) {
+      const fileDetailDiv = document.getElementById('fileDetail');
+      
+      console.log('读取成功！');
+      console.log('文件大小:', result.fileInfo.fileSize);
+      console.log('压缩方法:', result.fileInfo.compressionMethod === 0 ? '存储' : result.fileInfo.compressionMethod === 8 ? 'DEFLATE' : result.fileInfo.compressionMethod);
+      
+      let html = '<div class="success">✅ 文件读取成功！</div>';
+      
+      html += '<h3>📄 文件信息</h3>';
+      html += '<table>';
+      html += `<tr><th>属性</th><th>值</th></tr>`;
+      html += `<tr><td>文件名</td><td>${result.fileInfo.filename}</td></tr>`;
+      html += `<tr><td>原始大小</td><td>${formatSize(result.fileInfo.fileSize)} (${result.fileInfo.fileSize} 字节)</td></tr>`;
+      html += `<tr><td>压缩后大小</td><td>${formatSize(result.fileInfo.compressedSize)} (${result.fileInfo.compressedSize} 字节)</td></tr>`;
+      html += `<tr><td>压缩方法</td><td>${result.fileInfo.compressionMethod === 0 ? '存储（无压缩）' : result.fileInfo.compressionMethod === 8 ? 'DEFLATE' : `未知 (${result.fileInfo.compressionMethod})`}</td></tr>`;
+      html += `<tr><td>CRC32</td><td>0x${result.fileInfo.crc32.toString(16).padStart(8, '0')}</td></tr>`;
+      html += `<tr><td>最后修改时间</td><td>${result.fileInfo.lastModified.toLocaleString('zh-CN')}</td></tr>`;
+      html += `<tr><td>内容大小</td><td>${result.content instanceof Uint8Array ? result.content.length : 'Blob'} 字节</td></tr>`;
+      html += '</table>';
+      
+      const isTextFile = filename.match(/\.(txt|md|json|js|ts|html|xml|csv|log)$/i);
+      const isImageFile = filename.match(/\.(png|jpg|jpeg|gif|webp|bmp|svg)$/i);
+      
+      if (isTextFile && result.content instanceof Uint8Array) {
+        const text = new TextDecoder('utf-8').decode(result.content);
+        
+        html += '<h3>📝 文件内容预览</h3>';
+        html += '<div style="background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; max-height: 500px; overflow-y: auto;">';
+        
+        if (text.length > 10000) {
+          html += text.substring(0, 10000);
+          html += `\n\n...（还有 ${text.length - 10000} 字符未显示）`;
+        } else {
+          html += text;
+        }
+        
+        html += '</div>';
+      } else if (isImageFile && result.content instanceof Uint8Array) {
+        // 图片预览
+        html += '<h3>🖼️ 图片预览</h3>';
+        
+        // 创建 Blob URL
+        const blob = new Blob([result.content], { type: 'image/' + (filename.split('.').pop() || 'png') });
+        const imageUrl = URL.createObjectURL(blob);
+        
+        html += '<div style="text-align: center; background: #f8f9fa; padding: 20px; border-radius: 4px; margin-top: 15px;">';
+        html += `<img src="${imageUrl}" style="max-width: 100%; max-height: 500px; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" alt="${filename}" onload="console.log('图片加载成功:', this.naturalWidth, 'x', this.naturalHeight)" onerror="console.error('图片加载失败'); this.parentElement.innerHTML='<div style=\'color: red;\'>图片加载失败</div>'" />`;
+        html += `<p style="margin-top: 10px; color: #666;">${filename} - ${formatSize(result.content.length)}</p>`;
+        html += '</div>';
+      } else {
+        html += '<div style="background: #fff3cd; padding: 10px; border-radius: 4px; margin-top: 15px; border: 1px solid #ffc107;">';
+        html += '⚠️ 该文件不是文本或图片文件，无法显示内容预览。';
+        html += '</div>';
+      }
+      
+      fileDetailDiv.innerHTML = html;
+    }
+
+    // 读取文件内容函数
+    window.readFileContent = async function() {
+      const reader = window.currentReader;
+      const filename = document.getElementById('filenameInput').value.trim();
+      const outputDiv = document.getElementById('output');
+      const showContent = document.getElementById('showContentCheckbox').checked;
+      
+      if (!reader) {
+        outputDiv.innerHTML = '<div class="error">请先加载 ZIP 文件（点击"开始测试"）</div>';
+        return;
+      }
+      
+      if (!filename) {
+        outputDiv.innerHTML = '<div class="error">请输入文件名</div>';
+        return;
+      }
+
+      const btn = document.getElementById('readFileBtn');
+      btn.disabled = true;
+      btn.textContent = '读取中...';
+
+      try {
+        console.log('读取文件内容:', filename);
+        
+        const { formatSize } = await import('net-zip-info');
+        
+        const result = await reader.getFileContent(filename, {
+          onProgress: (loaded, total) => {
+            const percent = ((loaded / total) * 100).toFixed(1);
+            console.log(`读取进度：${percent}% (${loaded}/${total} 字节)`);
+          }
+        });
+        
+        displayFileDetail(filename, result, formatSize);
+        document.getElementById('fileDetailPanel').classList.add('active');
+        
+      } catch (error) {
+        console.error('读取文件失败:', error);
+        const fileDetailDiv = document.getElementById('fileDetail');
+        fileDetailDiv.innerHTML = `
+          <div class="error">
+            ❌ 读取文件失败<br>
+            <strong>错误信息:</strong> ${error.message}
+          </div>
+        `;
+        document.getElementById('fileDetailPanel').classList.add('active');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '读取文件内容';
+      }
+    };
+  </script>
+
+  <script>
+    // 页面加载时恢复上次使用的 URL
+    window.addEventListener('DOMContentLoaded', () => {
+      const savedUrl = localStorage.getItem('lastTestZipUrl');
+      if (savedUrl) {
+        document.getElementById('zipUrl').value = savedUrl;
+      }
+    });
   </script>
 </body>
 </html>

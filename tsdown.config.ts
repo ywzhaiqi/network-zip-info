@@ -9,5 +9,5 @@ export default defineConfig({
   outDir: 'dist',
   format: ['esm'],
   dts: true,
-  sourcemap: false,
+  sourcemap: true,
 })
